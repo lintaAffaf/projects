@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Quiz Application</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables for Firebase configuration
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
+        
+        // Questions for the quiz
+        const questions = [
+            {
+                text: "What does 'SCD' stand for?",
+                options: ["Software Construction & Development", "System Control Design", "Secure Code Deployment", "Source Code Documentation"],
+                answer: "Software Construction & Development"
+            },
+            {
+                text: "What is the primary purpose of a UML Use Case Diagram?",
+                options: ["To show database relationships", "To model the structure of a system's classes", "To represent the functional requirements from a user's perspective", "To document test cases"],
+                answer: "To represent the functional requirements from a user's perspective"
+            },
+            {
+                text: "Which of the following is a non-functional requirement?",
+                options: ["User can add a task", "The system must be secure", "Admin can create a new quiz", "User can view their score"],
+                answer: "The system must be secure"
+            }
+        ];
+
+        // UI elements
+        const quizContainer = document.getElementById('quiz-container');
+        const userIdDisplay = document.getElementById('user-id-display');
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let db, auth;
+
+        // Firebase Initialization and Authentication
+        async function initializeFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userIdDisplay.textContent = `Your User ID: ${user.uid}`;
+                        renderQuiz();
+                    } else {
+                        // Sign in anonymously if no auth token is provided
+                        await signInAnonymously(auth);
+                        userIdDisplay.textContent = 'Authenticating...';
+                    }
+                });
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                showError("Failed to initialize the app. Check the console for details.");
+            }
+        }
+
+        // Render functions
+        function renderQuiz() {
+            quizContainer.innerHTML = '';
+            const question = questions[currentQuestionIndex];
+            
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-xl shadow-lg p-6 w-full max-w-lg transition-transform duration-300 transform scale-100';
+
+            const questionText = document.createElement('h2');
+            questionText.className = 'text-2xl font-bold mb-4 text-center text-gray-800';
+            questionText.textContent = question.text;
+            
+            const optionsContainer = document.createElement('div');
+            optionsContainer.className = 'space-y-4';
+
+            question.options.forEach(option => {
+                const button = document.createElement('button');
+                button.className = 'w-full bg-indigo-500 hover:bg-indigo-600 text-white font-medium py-3 px-6 rounded-lg transition-colors duration-300 shadow-md';
+                button.textContent = option;
+                button.onclick = () => handleAnswer(option);
+                optionsContainer.appendChild(button);
+            });
+
+            card.appendChild(questionText);
+            card.appendChild(optionsContainer);
+            quizContainer.appendChild(card);
+        }
+
+        function renderScore() {
+            quizContainer.innerHTML = '';
+            
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-xl shadow-lg p-8 text-center w-full max-w-lg';
+
+            const scoreText = document.createElement('h2');
+            scoreText.className = 'text-3xl font-bold mb-2 text-gray-800';
+            scoreText.textContent = `Quiz Complete!`;
+            
+            const resultText = document.createElement('p');
+            resultText.className = 'text-5xl font-extrabold text-indigo-600 mb-6';
+            resultText.textContent = `${score} / ${questions.length}`;
+
+            const restartButton = document.createElement('button');
+            restartButton.className = 'w-full bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-lg transition-colors duration-300 shadow-md';
+            restartButton.textContent = 'Start New Quiz';
+            restartButton.onclick = () => {
+                currentQuestionIndex = 0;
+                score = 0;
+                renderQuiz();
+            };
+            
+            const userId = auth.currentUser?.uid || 'anonymous';
+            const quizId = 'quiz_1';
+            const userScoreRef = doc(db, `/artifacts/${appId}/users/${userId}/scores`, quizId);
+
+            // Save the score to Firestore
+            setDoc(userScoreRef, { score: score, totalQuestions: questions.length, timestamp: new Date() })
+                .then(() => {
+                    console.log("Score successfully written to Firestore!");
+                })
+                .catch((error) => {
+                    console.error("Error writing score to Firestore: ", error);
+                    showError("Failed to save your score. Please check the console.");
+                });
+
+            card.appendChild(scoreText);
+            card.appendChild(resultText);
+            card.appendChild(restartButton);
+            quizContainer.appendChild(card);
+        }
+
+        function handleAnswer(selectedOption) {
+            const question = questions[currentQuestionIndex];
+            if (selectedOption === question.answer) {
+                score++;
+            }
+
+            currentQuestionIndex++;
+            if (currentQuestionIndex < questions.length) {
+                renderQuiz();
+            } else {
+                renderScore();
+            }
+        }
+
+        function showError(message) {
+            quizContainer.innerHTML = `<div class="bg-red-500 text-white p-4 rounded-lg shadow-md">${message}</div>`;
+        }
+        
+        // Initial setup
+        initializeFirebase();
+
+    </script>
+
+    <main class="w-full flex justify-center p-4">
+        <div class="flex flex-col items-center space-y-4 w-full">
+            <h1 class="text-4xl sm:text-5xl font-extrabold text-center text-gray-900 drop-shadow-md">
+                Online Quiz Application
+            </h1>
+            <div id="user-id-display" class="bg-gray-100 text-gray-600 p-2 text-sm rounded-md shadow-inner text-center w-full max-w-lg break-words">
+                Authenticating...
+            </div>
+            <div id="quiz-container" class="w-full max-w-lg flex flex-col items-center">
+                <!-- Quiz content will be rendered here by JavaScript -->
+            </div>
+        </div>
+    </main>
+
+</body>
+</html>
